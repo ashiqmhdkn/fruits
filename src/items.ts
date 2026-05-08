@@ -130,19 +130,31 @@ export async function putitem(request, env) {
 
 export async function deleteitem(request, env) {
   try {
+
     const id = new URL(request.url).pathname.split("/")[2];
 
     const item = await env.DB.prepare(
       `SELECT image FROM items WHERE id = ?`
     ).bind(id).first();
 
+    if (!item) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Item not found."
+        }),
+        { status: 404, headers }
+      );
+    }
+
     // Delete image from R2
-    if (item?.image) {
+    if (item.image) {
 
       try {
+
         const url = new URL(item.image);
 
-        // removes leading "/"
+        // remove leading "/"
         const key = url.pathname.substring(1);
 
         console.log("Deleting key:", key);
@@ -150,6 +162,7 @@ export async function deleteitem(request, env) {
         await env.friuts.delete(key);
 
       } catch (e) {
+
         console.log("Image delete failed:", e);
       }
     }
@@ -166,7 +179,7 @@ export async function deleteitem(request, env) {
       { headers }
     );
 
-  } catch (err) {
+  } catch (err: any) {
 
     return new Response(
       JSON.stringify({
