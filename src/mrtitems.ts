@@ -21,7 +21,6 @@ export async function postmrtitems(request, env) {
     }
 
     let imageUrl = null;
-    let date = new Date().toISOString();
 
     if (image && typeof image !== "string") {
       const imageKey = `mrtimages/${id}`;
@@ -30,9 +29,9 @@ export async function postmrtitems(request, env) {
       imageUrl = `https://pub-c6af304c8e664fe5bcd74ee4f5adfb78.r2.dev/${imageKey}`;
     }
     const result = await env.DB.prepare(
-      `INSERT INTO mrtitems (id, name, price, quantity, image, onupdate)
+      `INSERT INTO mrtitems (id, name, price, quantity, image)
        VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(id, name, price, quantity, imageUrl ?? "", date).run();
+    ).bind(id, name, price, quantity, imageUrl ?? "").run();
 
     return Response.json({ success: result.success });
 
@@ -65,8 +64,6 @@ export async function putmrtitem(request, env) {
 
     let imageUrl = object.image;
 
-    let date = new Date().toISOString();
-
     // Partial updates
     const updatedName = name ?? object.name;
 
@@ -98,7 +95,7 @@ export async function putmrtitem(request, env) {
 
     const result = await env.DB.prepare(
       `UPDATE mrtitems
-       SET name = ?, price = ?, quantity = ?, image = ?, onupdate = ?
+       SET name = ?, price = ?, quantity = ?, image = ?
        WHERE id = ?`
     )
       .bind(
@@ -106,7 +103,6 @@ export async function putmrtitem(request, env) {
         updatedPrice,
         updatedQuantity,
         imageUrl,
-        date,
         id
       )
       .run();
