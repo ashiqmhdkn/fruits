@@ -30,7 +30,7 @@ export async function postmrtitems(request, env) {
     }
     const result = await env.DB.prepare(
       `INSERT INTO mrtitems (id, name, price, quantity, image)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?)`
     ).bind(id, name, price, quantity, imageUrl ?? "").run();
 
     return Response.json({ success: result.success });
