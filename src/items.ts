@@ -1,32 +1,26 @@
 const headers = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-}; 
+};
 export async function postitems(request, env) {
   try {
     const formdata = await request.formData();
 
-    const id = formdata.get("id");
+    const id = crypto.randomUUID();
     const name = formdata.get("name");
     const price = Number(formdata.get("price"));
     const quantity = Number(formdata.get("quantity") ?? 0);
     const image = formdata.get("image");
 
-    if (!id || !name || isNaN(price)) {
+    if (!name || isNaN(price)) {
       return new Response(JSON.stringify({
         success: false,
         message: "Invalid input"
       }), { status: 400 });
     }
-    
-  const object = await env.DB.prepare(
-      `SELECT * FROM items WHERE id = ?`
-    ).bind(id).first();
 
-if (object) {
-  return new Response("Item already exists", { status: 409 });
-}    
     let imageUrl = null;
+    let date = new Date().toISOString();
 
     if (image && typeof image !== "string") {
       const imageKey = `images/${id}`;
@@ -35,9 +29,9 @@ if (object) {
       imageUrl = `https://pub-c6af304c8e664fe5bcd74ee4f5adfb78.r2.dev/${imageKey}`;
     }
     const result = await env.DB.prepare(
-      `INSERT INTO items (id, name, price, quantity, image)
-       VALUES (?, ?, ?, ?, ?)`
-    ).bind(id, name, price, quantity, imageUrl ?? "").run();
+      `INSERT INTO items (id, name, price, quantity, image, onupdate)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(id, name, price, quantity, imageUrl ?? "", date).run();
 
     return Response.json({ success: result.success });
 
@@ -48,74 +42,142 @@ if (object) {
     }, { status: 500 });
   }
 }
+
 export async function putitem(request, env) {
   try {
     const id = new URL(request.url).pathname.split("/")[2];
+
     const object = await env.DB.prepare(
       `SELECT * FROM items WHERE id = ?`
     ).bind(id).first();
-    if (!object) return new Response("Not found", { status: 404 });
+
+    if (!object) {
+      return new Response("Not found", { status: 404 });
+    }
+
     const formdata = await request.formData();
-    const name = formdata.get("name") as string;
-    const price = Number(formdata.get("price"));
-    const quantity = Number(formdata.get("quantity"));
-    const image = formdata.get("image") as File;
-    let imageUrl = null;
-    
-    if (image) {
+
+    const name = formdata.get("name") as string | null;
+    const priceValue = formdata.get("price");
+    const quantityValue = formdata.get("quantity");
+    const image = formdata.get("image") as File | null;
+
+    let imageUrl = object.image;
+
+    let date = new Date().toISOString();
+
+    // Partial updates
+    const updatedName = name ?? object.name;
+
+    const updatedPrice =
+      priceValue !== null ? Number(priceValue) : object.price;
+
+    const updatedQuantity =
+      quantityValue !== null ? Number(quantityValue) : object.quantity;
+
+    // Image update only if new image uploaded
+    if (image && image.size > 0) {
+
+      // delete old image
       if (object.image) {
-        console.log("Deleting old image from R2 with key:", object.image);
-        const key = env.friuts.get(object.image.split(".r2.dev/")[1]);
-        console.log("Key to delete:", key);
-        await env.friuts.delete(key);
+        const oldKey = object.image.split(".r2.dev/")[1];
+
+        if (oldKey) {
+          await env.friuts.delete(oldKey);
+        }
       }
+
       const imageKey = `images/${id}-${image.name}`;
+
       await env.friuts.put(imageKey, image);
-      imageUrl = `https://pub-c6af304c8e664fe5bcd74ee4f5adfb78.r2.dev/${imageKey}`; 
-      }
+
+      imageUrl =
+        `https://pub-c6af304c8e664fe5bcd74ee4f5adfb78.r2.dev/${imageKey}`;
+    }
+
     const result = await env.DB.prepare(
       `UPDATE items
-       SET name = ?, price = ?, quantity = ?, image = ?
+       SET name = ?, price = ?, quantity = ?, image = ?, onupdate = ?
        WHERE id = ?`
-    ).bind(name, price, quantity, imageUrl ?? "", id).run();
+    )
+      .bind(
+        updatedName,
+        updatedPrice,
+        updatedQuantity,
+        imageUrl,
+        date,
+        id
+      )
+      .run();
 
-    return new Response(JSON.stringify({
-      success: result.success
-    }), { headers });
+    return new Response(
+      JSON.stringify({
+        success: result.success,
+      }),
+      { headers }
+    );
 
   } catch (err) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: err.message
-    }), { status: 500, headers });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: err.message,
+      }),
+      { status: 500, headers }
+    );
   }
 }
+
 export async function deleteitem(request, env) {
   try {
     const id = new URL(request.url).pathname.split("/")[2];
-    const image = await env.DB.prepare(
+
+    const item = await env.DB.prepare(
       `SELECT image FROM items WHERE id = ?`
     ).bind(id).first();
-    if (image != null) {
-     const key = image.image.split(".r2.dev/")[1];
-     await env.friuts.delete(key);
-  }
 
+    // Delete image from R2
+    if (item?.image) {
+
+      try {
+        const url = new URL(item.image);
+
+        // removes leading "/"
+        const key = url.pathname.substring(1);
+
+        console.log("Deleting key:", key);
+
+        await env.friuts.delete(key);
+
+      } catch (e) {
+        console.log("Image delete failed:", e);
+      }
+    }
+
+    // Delete DB row
     const result = await env.DB.prepare(
       `DELETE FROM items WHERE id = ?`
     ).bind(id).run();
 
-    return new Response(JSON.stringify({
-      success: result.success
-    }), { headers });
+    return new Response(
+      JSON.stringify({
+        success: result.success
+      }),
+      { headers }
+    );
 
   } catch (err) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: err.message
-    }), { status: 500, headers });
+
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: err.message
+      }),
+      { status: 500, headers }
+    );
   }
 }
+
 export async function getitems(request, env) {
   try {
     const { results } = await env.DB.prepare(
